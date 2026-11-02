@@ -41,7 +41,7 @@ export default function Home() {
         </div>
 
         <a
-          href="#how-it-works"
+          href="/case"
           className="rounded-full border border-[#E6E1D7] px-5 py-2.5 text-sm font-semibold transition hover:border-[#B99A62] hover:bg-white"
         >
           Enter the court →
@@ -71,7 +71,7 @@ export default function Home() {
 
           <div className="mt-10 flex flex-col gap-4 sm:flex-row">
             <a
-              href="#how-it-works"
+              href="/case"
               className="inline-flex items-center justify-center gap-3 rounded-full bg-[#17243A] px-8 py-4 font-semibold text-white shadow-lg shadow-[#17243A]/10 transition hover:-translate-y-1 hover:bg-[#263954]"
             >
               File a Case <span className="text-[#D8BD87]">→</span>
