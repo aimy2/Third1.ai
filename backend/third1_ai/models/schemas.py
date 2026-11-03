@@ -83,11 +83,99 @@ class Clarification(BaseModel):
 
         return self
 
+
+class ParticipantAssessment(BaseModel):
+    participant: ParticipantSpeaker
+
+    strongest_valid_points: list[str] = Field(
+        default_factory=list,
+        description="The strongest points in this participant's position, grounded in the conversation."
+    )
+
+    weaknesses: list[str] = Field(
+        default_factory=list,
+        description="Specific weaknesses in this participant's reasoning, claims, or actions. Do not invent faults."
+    )
+
+    overall_assessment: str = Field(
+        description="A fair assessment of this participant's position in the actual disagreement."
+    )
+
+
+
 class Verdict(BaseModel):
     category: VerdictCategory
-    summary: str
-    reasoning: str
-    recommendations: list[str] = Field(default_factory=list)
+    more_reasonable_participant: Optional[ParticipantSpeaker] = Field(
+    description=(
+         "The participant judged more reasonable. Must be participant_01 "
+         "or participant_02 for an individual-winner verdict, and None "
+         "for all other verdict categories."
+    )
+    )
+
+    summary: str = Field(
+        description="A concise statement of the overall verdict."
+    )
+
+    participant_assessments: list[ParticipantAssessment] = Field(
+        description="Exactly one assessment for each participant."
+    )
+
+    supported_points: list[str] = Field(default_factory=list)
+    disputed_points: list[str] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+
+    reasoning: str = Field(
+        description="Evidence-based explanation of why this verdict follows from the conversation."
+    )
+
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="Specific, practical recommendations addressing the actual disagreement."
+    )
+
+    closing_remark: str = Field(
+        description="A short, natural Third1 AI closing remark. Humor is optional and must not undermine fairness."
+    )
+
+    @model_validator(mode="after")
+    def validate_participant_assessments(self):
+        participants = [
+            assessment.participant
+            for assessment in self.participant_assessments
+        ]
+
+        expected = {
+            ParticipantSpeaker.PARTICIPANT_01,
+            ParticipantSpeaker.PARTICIPANT_02,
+        }
+
+        if len(participants) != 2 or set(participants) != expected:
+            raise ValueError(
+                "A verdict must contain exactly one assessment for each participant."
+            )
+        if self.category == VerdictCategory.PERSON_A_MORE_REASONABLE:
+            if self.more_reasonable_participant != ParticipantSpeaker.PARTICIPANT_01:
+                raise ValueError(
+                    "PERSON_A_MORE_REASONABLE requires participant_01."
+                )
+
+        elif self.category == VerdictCategory.PERSON_B_MORE_REASONABLE:
+            if self.more_reasonable_participant != ParticipantSpeaker.PARTICIPANT_02:
+                raise ValueError(
+                    "PERSON_B_MORE_REASONABLE requires participant_02."
+                )
+
+        elif self.more_reasonable_participant is not None:
+            raise ValueError(
+                "The more reasonable participant must be None "
+                "when there is no individual winner."
+            )
+        
+
+        return self
+
+
 
 
 class InvestigatorAction(str, Enum):
@@ -97,15 +185,42 @@ class InvestigatorAction(str, Enum):
 
 class ParticipantPosition(BaseModel):
     participant: ParticipantSpeaker
-    stated_position: str
-    wants: list[str] = Field(default_factory=list)
-    objections: list[str] = Field(default_factory=list)
+
+    stated_position: str = Field(
+        description=(
+            "The participant's current overall position, synthesized "
+            "from their original statements and all clarification answers. "
+            "Do not merely repeat their first statement."
+        )
+    )
+
+    wants: list[str] = Field(
+        default_factory=list,
+        description="What the participant currently wants, based on their statements."
+    )
+
+    objections: list[str] = Field(
+        default_factory=list,
+        description="What the participant currently objects to, based on their statements."
+    )
 
 
 class DisputedClaim(BaseModel):
-    claim: str
+    claim: str = Field(
+        description="The unresolved claim made by one participant."
+    )
+
     made_by: ParticipantSpeaker
-    conflicting_with: Optional[str] = None
+
+    conflicting_with: Optional[str] = Field(
+        default=None,
+        description="The opposing claim that conflicts with this claim."
+    )
+
+    conflicting_claim_by: Optional[ParticipantSpeaker] = Field(
+        default=None,
+        description="The participant who made the opposing claim."
+    )
 
 
 class InvestigatorQuestion(BaseModel):
@@ -135,6 +250,36 @@ class InvestigatorOutput(BaseModel):
         elif self.next_question is not None:
             raise ValueError(
                 "next_question must be None when action is ready_for_verdict."
+            )
+
+        return self
+
+
+class EvidenceAuditOutput(BaseModel):
+    is_consistent: bool = Field(
+        description="Whether the verdict is internally consistent and supported by the case evidence."
+    )
+
+    issues: list[str] = Field(
+        default_factory=list,
+        description="Specific contradictions, unsupported claims, or evidence-handling errors."
+    )
+
+    revision_instructions: list[str] = Field(
+        default_factory=list,
+        description="Specific changes the Referee must make to resolve the identified issues."
+    )
+
+    @model_validator(mode="after")
+    def validate_audit_result(self):
+        if self.is_consistent and (self.issues or self.revision_instructions):
+            raise ValueError(
+                "A consistent verdict cannot contain audit issues or revision instructions."
+            )
+
+        if not self.is_consistent and not self.issues:
+            raise ValueError(
+                "An inconsistent verdict must identify at least one issue."
             )
 
         return self
