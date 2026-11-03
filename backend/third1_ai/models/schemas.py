@@ -88,3 +88,53 @@ class Verdict(BaseModel):
     summary: str
     reasoning: str
     recommendations: list[str] = Field(default_factory=list)
+
+
+class InvestigatorAction(str, Enum):
+    ASK_CLARIFICATION = "ask_clarification"
+    READY_FOR_VERDICT = "ready_for_verdict"
+
+
+class ParticipantPosition(BaseModel):
+    participant: ParticipantSpeaker
+    stated_position: str
+    wants: list[str] = Field(default_factory=list)
+    objections: list[str] = Field(default_factory=list)
+
+
+class DisputedClaim(BaseModel):
+    claim: str
+    made_by: ParticipantSpeaker
+    conflicting_with: Optional[str] = None
+
+
+class InvestigatorQuestion(BaseModel):
+    question: str = Field(min_length=1)
+    target_speaker: ParticipantSpeaker
+    reason: str = Field(min_length=1)
+
+
+class InvestigatorOutput(BaseModel):
+    dispute_summary: str
+    participant_positions: list[ParticipantPosition]
+    established_information: list[str] = Field(default_factory=list)
+    disputed_claims: list[DisputedClaim] = Field(default_factory=list)
+    unknown_information: list[str] = Field(default_factory=list)
+
+    action: InvestigatorAction
+    next_question: Optional[InvestigatorQuestion] = None
+
+    @model_validator(mode="after")
+    def validate_action_and_question(self):
+        if self.action == InvestigatorAction.ASK_CLARIFICATION:
+            if self.next_question is None:
+                raise ValueError(
+                    "A clarification question is required when action is ask_clarification."
+                )
+
+        elif self.next_question is not None:
+            raise ValueError(
+                "next_question must be None when action is ready_for_verdict."
+            )
+
+        return self
