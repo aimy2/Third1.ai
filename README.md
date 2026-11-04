@@ -1,195 +1,318 @@
-# third1.ai
+# Third1 AI
 
-> **A structured AI referee for everyday disagreements.**
+**Your unbiased third one who isn't afraid to tell you who is wrong.**
 
-third1.ai turns an informal argument into a small, evidence-aware decision workflow. Each participant gives testimony, the system asks only the clarifying questions that could change the outcome, and a final verdict explains the reasoning without pretending that every dispute has a clear winner.
+🌐 **Live Demo:** [https://third1-ai.vercel.app/](https://third1-ai.vercel.app/)
 
-This project is intentionally designed as more than a chat wrapper: the user experience, API contracts, prompt design, validation, failure handling, and output schema work together as one decision system.
+Third1 AI is an AI-powered referee for everyday disagreements. Two participants present their accounts of a dispute, an Investigator identifies material uncertainties and asks targeted clarification questions, and a Referee evaluates both positions and produces a structured verdict.
 
-## Why this project
+The goal is not to manufacture a winner. The system distinguishes supported information, disputed claims, reasonable inferences, and unknowns so that its conclusions remain proportionate to the available evidence.
 
-Most AI applications ask a model to produce an answer immediately. third1.ai separates **information gathering** from **judgment**:
+## Product Workflow
 
-1. Capture both sides of the case.
-2. Detect whether a material uncertainty remains.
-3. Ask a targeted clarification question, up to three times.
-4. Generate a structured verdict from the complete conversation.
+1. Both participants enter a case and submit their opening testimony.
+2. The Investigator examines the accounts and identifies material uncertainties.
+3. If clarification could change the outcome, the Investigator asks one participant a targeted question.
+4. The selected participant can answer or skip the question.
+5. The investigation continues until the Investigator is ready for a verdict or the clarification limit is reached.
+6. The Referee evaluates both participants and returns a structured verdict.
 
-That separation improves consistency, makes the interaction easier to reason about, and prevents the verdict prompt from having to guess what information is missing.
+Each participant can submit one opening testimony. Ordinary testimony closes after both opening statements. Subsequent interaction is limited to targeted clarification answers or skips.
 
-## Product flow
+There can be at most three answered clarifications. Skipped clarifications do not count toward this limit and are not treated as evidence against the participant.
 
-```text
-Case setup
-   |
-   v
-Two participant testimonies
-   |
-   +--> Optional voice input --> /api/transcribe
-   |
-   v
-Clarification analysis --------> /api/analyze-case
-   |                                  |
-   |<-- ask one targeted question ----+
-   |
-   v
-Structured verdict generation --> /api/generate-verdict
-   |
-   v
-Verdict UI: conclusion, evidence, unknowns, reasoning, recommendations
-```
+## Verdict Categories
 
-The client owns the conversational state and renders the courtroom experience. Server routes own provider access, input validation, timeouts, response validation, and the AI contracts.
+The Referee returns one of five categories:
 
-## Engineering highlights
+| Category | Meaning |
+|---|---|
+| `person_a_more_reasonable` | Participant 01 has the stronger position. |
+| `person_b_more_reasonable` | Participant 02 has the stronger position. |
+| `both_wrong` | Both participants have meaningful faults. |
+| `both_have_valid_points` | Both have legitimate positions, with neither clearly more reasonable. |
+| `insufficient_information` | Material information is missing and could change the decision. |
 
-### Deliberate AI orchestration
-
-- Uses a two-stage reasoning flow instead of one oversized prompt.
-- The clarification stage decides between `ask_clarification` and `ready_for_verdict`.
-- Clarifications are limited to three per case and must target one participant.
-- The verdict stage evaluates both participants independently and chooses one explicit category:
-  - `person_a_more_reasonable`
-  - `person_b_more_reasonable`
-  - `both_wrong`
-  - `both_have_valid_points`
-  - `insufficient_information`
-
-### Structured model outputs
-
-Both AI routes use strict JSON schemas. This gives the UI stable contracts instead of relying on fragile text parsing:
-
-- Clarification analysis returns an action, target speaker, question, and reason.
-- Verdict generation returns a category, summary, participant assessments, supported points, disputed points, unknowns, reasoning, recommendations, and a closing remark.
-
-The server validates the model response again before returning it to the browser. A model response is treated as untrusted external data, even when it was requested in JSON mode.
-
-### Defensive API boundaries
-
-The route handlers validate:
-
-- Required case metadata and participant names.
-- Conversation message speakers and message types.
-- Message length and maximum conversation size.
-- Clarification count and allowed workflow state.
-- Audio MIME types and the 25 MB upload limit.
-- Empty, malformed, or incomplete provider responses.
-
-Provider calls use `AbortController` timeouts and return explicit HTTP errors for configuration failures, invalid input, rate limits, timeouts, and upstream failures. The Groq API key is kept server-side and is never exposed to the client.
-
-### Token-conscious prompt design
-
-Prompt instructions are compact and focused on invariants that affect correctness: evidence attribution, uncertainty, skipped answers, material clarification, category selection, and output requirements. The conversation remains in the user message, while reusable behavior rules stay in the system prompt.
-
-This keeps the system prompt predictable and reduces unnecessary token usage without removing the safeguards that make the verdict useful.
-
-### Voice input
-
-The browser records audio with `MediaRecorder`, selects a supported MIME type, and sends the file to `/api/transcribe`. The server normalizes MIME types, validates size and format, and uses Groq Whisper (`whisper-large-v3`) for transcription. Transcription preserves the spoken content and supports multilingual speech through Latin-character transliteration.
+The verdict includes individual participant assessments, supported points, disputed points, unknowns, reasoning, recommendations, and a closing remark.
 
 ## Architecture
 
-| Area | Implementation |
-| --- | --- |
-| UI | Next.js App Router, React client components |
-| Styling | Tailwind CSS v4 through the Turbopack loader |
-| AI provider | Groq Chat Completions and Whisper APIs |
-| Model | `openai/gpt-oss-20b` for analysis and verdict generation |
-| Runtime validation | TypeScript guards and strict response-schema checks |
-| API surface | Next.js Route Handlers under `app/api` |
-| Deployment shape | Stateless web application; no database required for the current flow |
-
-### Main routes
-
-| Route | Responsibility |
-| --- | --- |
-| `POST /api/analyze-case` | Decide whether another clarification is valuable |
-| `POST /api/generate-verdict` | Produce and validate the final structured verdict |
-| `POST /api/transcribe` | Validate audio and return a transcript |
-
-## Repository structure
+Third1 AI uses a Next.js frontend and a separate FastAPI backend. LangGraph orchestrates two AI agents.
 
 ```text
-app/
-  api/
-    analyze-case/route.ts       # clarification decision contract
-    generate-verdict/route.ts   # final verdict contract
-    transcribe/route.ts         # audio validation and transcription
-  case/page.tsx                 # case workflow and courtroom UI
-  page.tsx                      # landing page
-  globals.css                   # global styling
-next.config.ts                  # Next.js and Turbopack configuration
+                 Next.js Frontend
+                        |
+                        v
+               Next.js API Proxy
+                        |
+                        v
+                   FastAPI
+                        |
+                        v
+                 LangGraph Graph
+                        |
+                 Investigator
+                        |
+             +----------+----------+
+             |                     |
+      Ask clarification      Ready for verdict
+             |                     |
+             v                     v
+       Participant input         Referee
+             |                     |
+             +---- Resume ---------+
+                                   |
+                                   v
+                           Structured Verdict
 ```
 
-## Getting started
+### Main Components
+
+| Component | Responsibility |
+|---|---|
+| Next.js | Courtroom interface, participant interaction, and voice-input experience |
+| Next.js backend proxy | Forwards frontend API requests to FastAPI |
+| FastAPI | Case creation, state management, validation, and API responses |
+| LangGraph | Controls the Investigator-to-Referee workflow |
+| Investigator | Reviews the accounts and decides whether clarification is necessary |
+| Referee | Produces the final structured assessment |
+| Groq | Provides language-model inference and speech transcription |
+
+### Repository Structure
+
+```text
+Third1.ai/
+├── app/
+│   ├── api/
+│   │   ├── backend/
+│   │   │   └── [...path]/route.ts
+│   │   └── transcribe/route.ts
+│   ├── case/page.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   └── layout.tsx
+├── backend/
+│   ├── evaluation/
+│   └── third1_ai/
+│       ├── agents/
+│       ├── api/
+│       ├── graph/
+│       ├── models/
+│       ├── prompts/
+│       ├── services/
+│       └── main.py
+├── public/
+├── .env.local
+├── .gitignore
+├── next.config.ts
+├── package.json
+├── requirements.txt
+└── README.md
+```
+
+## Getting Started
 
 ### Prerequisites
 
-- Node.js compatible with the installed Next.js version
-- npm
+- Node.js and npm
+- Python 3.12 or a compatible Python version
 - A Groq API key
 
-### Install
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/aimy2/Third1.ai.git
+cd Third1.ai
+```
+
+### 2. Install Frontend Dependencies
 
 ```bash
 npm install
 ```
 
-### Configure environment
+### 3. Create and Activate a Python Environment
 
-Create `.env.local`:
+Using Conda:
+
+```bash
+conda create -n third1-backend python=3.12 -y
+conda activate third1-backend
+```
+
+Or use another Python virtual environment.
+
+### 4. Install Backend Dependencies
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 5. Configure Environment Variables
+
+Create `.env.local` in the repository root:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
+THIRD1_BACKEND_URL=http://127.0.0.1:8000
 ```
 
-The environment file is ignored by git. Never commit the real key.
+Keep your actual API key private. `.env.local` is excluded from Git.
 
-### Run locally
+### 6. Start the FastAPI Backend
+
+In the first terminal, with the Python environment activated:
+
+```bash
+uvicorn backend.third1_ai.main:app --reload --port 8000
+```
+
+The backend runs at:
+
+```text
+http://127.0.0.1:8000
+```
+
+Check its health:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+Interactive API documentation is available at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 7. Start the Next.js Frontend
+
+In a second terminal:
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open:
 
-## Verification
-
-```bash
-# Run the production build and TypeScript validation
-npm run build
-
-# Run ESLint
-npm run lint
+```text
+http://localhost:3000
 ```
 
-The production build verifies that the App Router pages and API route handlers compile together. The lint command covers the full repository; existing UI lint findings should be resolved before treating lint as a release gate.
+The frontend proxy uses `THIRD1_BACKEND_URL` to communicate with FastAPI.
 
-## Engineering trade-offs
+## Backend API
 
-### Stateless client workflow
+The FastAPI backend exposes the following endpoints:
 
-Case state currently lives in the browser rather than a database. This keeps the prototype simple, avoids storing sensitive interpersonal conversations, and makes local deployment inexpensive. The trade-off is that cases are not persisted across refreshes or devices.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Backend health check |
+| `POST` | `/cases` | Create a case and register both participants |
+| `GET` | `/cases/{case_id}` | Retrieve case state |
+| `POST` | `/cases/{case_id}/testimony` | Submit opening testimony |
+| `POST` | `/cases/{case_id}/answer` | Submit a clarification answer |
+| `POST` | `/cases/{case_id}/skip` | Skip a pending clarification |
 
-### Strict schemas over flexible prose
+The frontend accesses these endpoints through the Next.js proxy under `/api/backend/`.
 
-The model has less freedom in its response shape, but the UI gets deterministic fields and the server can reject malformed output. This is the safer choice for a user-facing decision workflow.
+### Example: Create a Case
 
-### Bounded clarification
+```json
+{
+  "title": "Meeting disagreement",
+  "participant_01_name": "Alex",
+  "participant_02_name": "Sam"
+}
+```
 
-Three questions is a deliberate product constraint: enough room to resolve important ambiguity, but not enough to create an expensive or endless interview. The system proceeds when it has sufficient evidence rather than demanding certainty.
+### Example: Submit Opening Testimony
 
-### External AI dependency
+```json
+{
+  "participant": "participant_01",
+  "content": "I arrived at the agreed meeting time."
+}
+```
 
-Groq provides fast inference and transcription, but the application remains dependent on provider availability, quotas, and model behavior. Provider failures are surfaced as explicit API errors so the UI can present a recoverable state instead of a fabricated result.
+### Example: Answer a Clarification
 
-## Future production hardening
+```json
+{
+  "clarification_id": "clarification-id",
+  "participant": "participant_02",
+  "answer": "I arrived later because of an unexpected meeting."
+}
+```
 
-- Add persistent case storage only with an explicit privacy and retention policy.
-- Add authentication, abuse prevention, and per-user/provider rate limiting.
-- Add automated route tests for invalid payloads, malformed model output, timeout behavior, and clarification limits.
-- Add observability for latency, provider errors, token usage, and workflow completion rates without logging private testimony.
-- Add a provider abstraction to make model fallback and controlled model upgrades easier.
+### Example: Skip a Clarification
+
+```json
+{
+  "clarification_id": "clarification-id",
+  "participant": "participant_02"
+}
+```
+
+## Voice Input
+
+The frontend supports microphone input using the browser's `MediaRecorder` API.
+
+Audio is submitted to the Next.js transcription endpoint:
+
+```text
+POST /api/transcribe
+```
+
+The transcription route uses Groq Whisper for speech-to-text processing. Transcribed text can be reviewed and edited before submission.
+
+## Testing and Verification
+
+The backend evaluation scripts cover case storage, clarification handling, clarification limits, Investigator parsing, and workflow resumption.
+
+Run the individual tests from the repository root:
+
+```bash
+python -m backend.evaluation.test_case_store
+python -m backend.evaluation.test_clarification_limit
+python -m backend.evaluation.test_clarification_service
+python -m backend.evaluation.test_investigator_parser
+python -m backend.evaluation.test_resume_workflow
+python -m backend.evaluation.test_skip_resume_workflow
+```
+
+The full workflow smoke test invokes the AI workflow and may require a valid Groq API key:
+
+```bash
+python -m backend.evaluation.test_workflow
+```
+
+Frontend checks:
+
+```bash
+npx tsc --noEmit
+npm run lint
+npm run build
+```
+
+## Current Limitations
+
+- **In-memory case storage:** Case state is held in backend memory. Restarting the FastAPI process loses active cases.
+- **Single shared device:** Both participants currently use the same device and can see the shared conversation.
+- **No identity verification:** The application cannot independently verify who is physically responding to a clarification.
+- **External AI dependency:** Inference and transcription depend on Groq availability, quotas, and model behavior.
+- **No persistent accounts:** Authentication and cross-device case access are not implemented.
+
+## Future Improvements
+
+Potential production improvements include:
+
+- Persistent storage with an explicit privacy and retention policy.
+- Participant authentication and separate-device sessions.
+- Rate limiting and abuse prevention.
+- Automated API integration tests and model-output evaluation.
+- Monitoring of latency, provider errors, token usage, and workflow completion without logging private testimony.
+- Controlled model upgrades and provider fallback.
 
 ## License
 

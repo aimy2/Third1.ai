@@ -255,31 +255,3 @@ class InvestigatorOutput(BaseModel):
         return self
 
 
-class EvidenceAuditOutput(BaseModel):
-    is_consistent: bool = Field(
-        description="Whether the verdict is internally consistent and supported by the case evidence."
-    )
-
-    issues: list[str] = Field(
-        default_factory=list,
-        description="Specific contradictions, unsupported claims, or evidence-handling errors."
-    )
-
-    revision_instructions: list[str] = Field(
-        default_factory=list,
-        description="Specific changes the Referee must make to resolve the identified issues."
-    )
-
-    @model_validator(mode="after")
-    def validate_audit_result(self):
-        if self.is_consistent and (self.issues or self.revision_instructions):
-            raise ValueError(
-                "A consistent verdict cannot contain audit issues or revision instructions."
-            )
-
-        if not self.is_consistent and not self.issues:
-            raise ValueError(
-                "An inconsistent verdict must identify at least one issue."
-            )
-
-        return self
